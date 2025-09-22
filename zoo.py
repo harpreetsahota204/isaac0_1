@@ -540,6 +540,8 @@ class IsaacModel(SamplesMixin, Model):
                 tensor_stream=tensor_stream,
                 max_new_tokens=8192,
                 do_sample=False,
+                pad_token_id=self.processor.tokenizer.pad_token_id,
+                eos_token_id=self.processor.tokenizer.eos_token_id,
             )
 
         # Decode and print output

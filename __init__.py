@@ -21,7 +21,7 @@ def download_model(model_name, model_path):
     snapshot_download(repo_id=model_name, local_dir=model_path)
 
 
-def load_model(model_path, **kwargs):
+def load_model(model_name, model_path, **kwargs):
     """Loads the model.
 
     Args:

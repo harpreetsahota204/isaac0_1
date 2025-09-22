@@ -214,7 +214,7 @@ class IsaacModel(SamplesMixin, Model):
 
         logger.info("Loading processor")
 
-        self.processor = IsaacProcessor.from_pretrained(
+        self.processor = IsaacProcessor(
             tokenizer=self.tokenizer,
             config=self.config
         )

@@ -1,0 +1,31 @@
+{
+    "name": "Isaac-0.1",
+    "url": "https://github.com/harpreetsahota204/isaac0_1",
+    "models": [
+        {
+            "base_name": "PerceptronAI/Isaac-0.1",
+            "base_filename":"Isaac-0.1",
+            "author": "PerceptronAI",
+            "license": "Creative Commons Attribution Non Commercial 4.0",
+            "source": "https://huggingface.co/PerceptronAI/Isaac-0.1",
+            "description": "Isaac 0.1 is an open-source, 2B-parameter model built for real-world applications. Isaac 0.1 is the first in Perceptron AI's family of models built to be the intelligence layer for the physical world.",
+            "tags": [
+                "detection",
+                "ocr",
+                "VLM",
+                "classification",
+                "zero-shot"
+            ],
+            "date_added": "2025-09-22",
+            "requirements": {
+                "packages": ["huggingface-hub","transformers", "torch", "torchvision", "perceptron"],
+                "cpu": {
+                    "support": true
+                },
+                "gpu": {
+                    "support": true
+                }
+            }
+        }
+    ]
+}

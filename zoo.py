@@ -384,6 +384,9 @@ class IsaacModel(SamplesMixin, Model):
                 if not bbox or text is None:
                     continue
                 
+                # Ensure text is a string (just like we do in regular detections)
+                text = str(text) if text else ""
+                
                 # Model outputs coordinates in 0-1000 range, normalize to 0-1
                 x1, y1, x2, y2 = map(float, bbox)
                 
@@ -395,7 +398,7 @@ class IsaacModel(SamplesMixin, Model):
                 
                 # Create Detection object with normalized coordinates
                 detection = fo.Detection(
-                    label=str(text) if text else "text",  # Ensure label is always a string
+                    label=text,  # Text content as label, just like regular detections
                     bounding_box=[x, y, w, h],
                 )
                 detections.append(detection)

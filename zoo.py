@@ -378,10 +378,10 @@ class IsaacModel(SamplesMixin, Model):
             try:
                 # Extract the bounding box coordinates and text content
                 bbox = box.get('bbox_2d', box.get('bbox', None))
-                text = box.get('text')  # The actual text string
+                text = box.get('text', '')  # The actual text string
                 
                 # Skip if missing required bbox or text fields
-                if not bbox or not text:
+                if not bbox or text is None:
                     continue
                 
                 # Model outputs coordinates in 0-1000 range, normalize to 0-1
@@ -395,9 +395,8 @@ class IsaacModel(SamplesMixin, Model):
                 
                 # Create Detection object with normalized coordinates
                 detection = fo.Detection(
-                    label="text",
+                    label=str(text) if text else "text",  # Ensure label is always a string
                     bounding_box=[x, y, w, h],
-                    text=str(text),
                 )
                 detections.append(detection)
                 

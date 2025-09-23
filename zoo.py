@@ -240,6 +240,11 @@ class IsaacModel(SamplesMixin, Model):
     def media_type(self):
         return "image"
     
+    @property
+    def ragged_batches(self):
+        """Enable handling of varying image sizes in batches."""
+        return True
+    
 
     @property
     def operation(self):
@@ -429,7 +434,7 @@ class IsaacModel(SamplesMixin, Model):
                 # Get coordinates from point_2d field and convert to float
                 x, y = point["point_2d"]
                 x = float(x)
-                y = float(x)
+                y = float(y)
                 
                 # Model outputs coordinates in 0-1000 range, normalize to 0-1
                 normalized_point = [
@@ -447,6 +452,53 @@ class IsaacModel(SamplesMixin, Model):
                 continue
                 
         return fo.Keypoints(keypoints=keypoints)
+
+    def _process_output(self, output_text: str, image: Image.Image):
+        """Process model output text based on the current operation type.
+        
+        Args:
+            output_text: Raw text output from the model
+            image: PIL Image that was processed (needed for size information)
+            
+        Returns:
+            Processed output in the appropriate format for the operation:
+            - str for vqa and ocr operations
+            - fo.Detections for detect and ocr_detection operations
+            - fo.Keypoints for point operations
+            - fo.Classifications for classify operations
+            - None if operation is not recognized
+        """
+        if self.operation == "vqa":
+            return output_text.strip()
+        
+        elif self.operation == "ocr":
+            return output_text.strip()
+        
+        elif self.operation == "detect":
+            parsed = self._parse_json(output_text) or {}
+            data = parsed.get('detections', [])
+            input_width, input_height = image.size
+            return self._to_detections(data, input_width, input_height)
+        
+        elif self.operation == "point":
+            parsed = self._parse_json(output_text) or {}
+            data = parsed.get('keypoints', [])
+            input_width, input_height = image.size
+            return self._to_keypoints(data, input_width, input_height)
+        
+        elif self.operation == "classify":
+            parsed = self._parse_json(output_text) or {}
+            data = parsed.get('classifications', [])
+            return self._to_classifications(data)
+        
+        elif self.operation == "ocr_detection":
+            parsed = self._parse_json(output_text) or {}
+            data = parsed.get('text_detections', [])
+            input_width, input_height = image.size
+            return self._to_ocr_detections(data, input_width, input_height)
+        
+        else:
+            return None
 
     def _to_classifications(self, classes: List[Dict]) -> fo.Classifications:
         """Convert a list of classification dictionaries to FiftyOne Classifications.
@@ -542,40 +594,108 @@ class IsaacModel(SamplesMixin, Model):
                 do_sample=False,
             )
 
-        # Decode and print output
+        # Decode and process output
         output_text = self.processor.tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+        return self._process_output(output_text, image)
 
-        if self.operation == "vqa":
-            return output_text.strip()
+    def _predict_batch(self, images: List[Image.Image], samples: Optional[List] = None) -> List:
+        """Process multiple images in a single model call for efficiency.
         
-        elif self.operation == "ocr":
-            return output_text.strip()
+        Args:
+            images: List of PIL Images to process
+            samples: Optional list of FiftyOne samples corresponding to each image
+            
+        Returns:
+            List of predictions, one for each input image
+        """
+        batch_size = len(images)
+        results = []
         
-        elif self.operation == "detect":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('detections', [])
-            input_width, input_height = image.size
-            return self._to_detections(data, input_width, input_height)
+        # Process each image with its corresponding sample (if provided)
+        for i in range(batch_size):
+            image = images[i]
+            sample = samples[i] if samples and i < len(samples) else None
+            
+            # Get prompt for this specific image/sample
+            prompt = self.prompt  # Start with instance default
+            
+            if sample is not None and self._get_field() is not None:
+                field_value = sample.get_field(self._get_field())
+                if field_value is not None:
+                    prompt = str(field_value)
+            
+            # Prepare messages for this image
+            messages = [
+                {"role": "system", "type": "text", "content": self.system_prompt},
+                {"role": "user", "type": "image", "content": "<image>"},
+                {"role": "user", "type": "text", "content": prompt}
+            ]
+            
+            # Process input
+            text = self.processor.apply_chat_template(
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True
+            )
+            
+            inputs = self.processor(
+                text=text, 
+                images=[image],  # Single image for this iteration
+                return_tensors="pt"
+            )
+            
+            tensor_stream = inputs["tensor_stream"].to(self.device)
+            
+            # Generate response
+            with torch.no_grad():
+                generated_ids = self.model.generate(
+                    tensor_stream=tensor_stream,
+                    max_new_tokens=8192,
+                    do_sample=False,
+                )
+            
+            # Decode and process output
+            output_text = self.processor.tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+            result = self._process_output(output_text, image)
+            results.append(result)
         
-        elif self.operation == "point":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('keypoints', [])
-            input_width, input_height = image.size
-            return self._to_keypoints(data, input_width, input_height)
+        return results
+
+    def predict_all(self, args):
+        """Efficient batch prediction for multiple images.
         
-        elif self.operation == "classify":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('classifications', [])
-            return self._to_classifications(data)
+        This method enables batch processing of multiple images for improved
+        performance when processing datasets.
         
-        elif self.operation == "ocr_detection":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('text_detections', [])
-            input_width, input_height = image.size
-            return self._to_ocr_detections(data, input_width, input_height)
+        Args:
+            args: List of tuples where each tuple contains (image, sample) or just images
+            
+        Returns:
+            List of predictions, one for each input
+        """
+        if not args:
+            return []
         
-        else:
-            return None
+        # Separate images and samples
+        images = []
+        samples = []
+        
+        for arg in args:
+            if isinstance(arg, tuple):
+                image, sample = arg
+                samples.append(sample)
+            else:
+                image = arg
+                samples.append(None)
+            
+            # Convert numpy arrays to PIL Images
+            if isinstance(image, np.ndarray):
+                images.append(Image.fromarray(image))
+            else:
+                images.append(image)
+        
+        # Process batch
+        return self._predict_batch(images, samples if any(s is not None for s in samples) else None)
 
     def predict(self, image, sample=None):
         """Process an image with the model.

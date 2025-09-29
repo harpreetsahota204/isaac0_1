@@ -2,6 +2,7 @@
 import os
 import logging
 import json
+import re
 from PIL import Image
 from typing import Dict, Any, List, Union, Optional
 
@@ -19,36 +20,21 @@ from .modular_isaac import IsaacProcessor
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant. You specialize in detecting and localizating meaningful visual elements. 
+DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant specializing in object detection and localization.
 
-You can detect and localize objects, components, people, places, things, and UI elements in images using 2D bound boxes.
+Return each detection using this format:
 
-Always return your response as valid JSON wrapped in ```json blocks.
+<point_box mention="what you detected"> (x1,y1) (x2,y2) </point_box>
 
-```json
-{
-    "detections": [
-        {
-            "bbox_2d": [x1, y1, x2, y2],
-            "label": "descriptive label for the bounding box"
-        }
-    ]
-}
-```
+Where:
+- (x1,y1) is the top-left corner in pixels (0-1000 range)
+- (x2,y2) is the bottom-right corner in pixels (0-1000 range)
+- mention describes what you detected
 
-The JSON should contain bounding boxes in pixel coordinates [x1,y1,x2,y2] format, where:
-- x1,y1 is the top-left corner
-- x2,y2 is the bottom-right corner
-- Provide specific, descriptive labels for each detected element
-- Include all relevant elements that match the user's request
-- For UI elements, include their function when possible (e.g., "Login Button" rather than just "Button")
-- If many similar elements exist, prioritize the most prominent or relevant ones
-
-The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and detect.
+Detect all relevant objects based on the user's request.
 
 <hint>BOX</hint>
 """
-
 
 DEFAULT_CLASSIFICATION_SYSTEM_PROMPT = """You are a helpful assistant. You specializes in comprehensive classification across any visual domain, capable of analyzing:
 
@@ -72,55 +58,53 @@ The JSON should contain a list of classifications where:
 - The response should be a list of classifications
 """
 
-DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful assistant. You specialize in key point detection across any visual domain. A key point represents the center of any meaningful visual element. 
 
-Key points should adapt to the context (physical world, digital interfaces, UI elements, etc.) while maintaining consistent accuracy and relevance. 
+DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful assistant specializing in detecting key points in images.
 
-For each key point identify the key point and provide a contextually appropriate label and always return your response as valid JSON wrapped in ```json blocks.
+Output each key point as:
+<point mention="description"> (x,y) </point>
 
-```json
-{
-    "keypoints": [
-        {
-            "point_2d": [x, y],
-            "label": "descriptive label for the point"
-        }
-    ]
-}
-```
-
-The JSON should contain points in pixel coordinates [x,y] format, where:
-- x is the horizontal center coordinate of the visual element
-- y is the vertical center coordinate of the visual element
-- Include all relevant elements that match the user's request
-- You can point to multiple visual elements
-
-The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's instructions and point.
+Where:
+- (x,y) represents the center of the meaningful visual element
+- Coordinates are integers from 0-1000
+- mention describes what the point represents
 
 <hint>POINT</hint>
 """
 
-DEFAULT_OCR_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant specializing in text detection and recognition (OCR) in images. Your can read, detect, and locate text from any visual content, including documents, UI elements, signs, or any other text-containing regions.
+DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a helpful assistant specializing in precise object segmentation.
 
-Always return your response as valid JSON wrapped in ```json blocks.
+Output segmentation masks as polygons:
+<polygon mention="description"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
 
-```json
-{
-    "text_detections": [
-        {
-            "bbox_2d": [x1, y1, x2, y2],
-            "text": "Exact text content found in this region"  // Transcribe text exactly as it appears
-        }
-    ]
-}
-```
+Where:
+- Each (x,y) is a vertex of the polygon outlining the object
+- List vertices in clockwise order around the object boundary
+- Use enough points to accurately capture the object's shape (typically 8-20 points)
+- Coordinates are integers from 0-1000
+- Close the polygon by making the last point near the first
 
-The JSON should contain bounding boxes in pixel coordinates [x1,y1,x2,y2] format, where:
-- x1,y1 is the top-left corner
-- x2,y2 is the bottom-right corner
-- The 'text' field should be a string containing the exact text content found in the region
+<hint>POLYGON</hint>
+"""
 
-The user might give you a single word instruction, a query, a list of objects, or more complex instructions. Adhere to the user's perform the OCR detections.
+DEFAULT_OCR_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant specializing in text detection and recognition (OCR) in images.
+
+Output each text region as:
+<point_box mention="exact text content"> (x1,y1) (x2,y2) </point_box>
+
+Where:
+- (x1,y1) is the top-left corner of the text bounding box
+- (x2,y2) is the bottom-right corner of the text bounding box
+- mention contains the EXACT text as it appears in that region
+- Coordinates are integers from 0-1000
+
+Important:
+- The mention attribute MUST contain the actual text you read in that region
+- Transcribe text exactly as it appears (preserve capitalization, punctuation, spacing)
+- Each point_box should contain one logical text unit (word, line, or text block)
+- Group related text regions in a collection when they form a document or sign
+
+Detect and read ALL visible text in the image.
 
 <hint>BOX</hint>
 """
@@ -132,8 +116,6 @@ DEFAULT_OCR_SYSTEM_PROMPT = """You are an OCR assistant. Your task is to identif
 - Any tables, lists, bullet points, or numbered items  
 - Special characters, spacing, and alignment  
 
-Output strictly the extracted text in Markdown format, reflecting the layout and structure of the original image. Do not add commentary, interpretation, or summarization—only return the raw text content with its formatting.
-
 Respond with 'No Text' if there is no text in the provided image.
 """
 
@@ -144,6 +126,7 @@ OPERATIONS = {
     "point": DEFAULT_KEYPOINT_SYSTEM_PROMPT,
     "ocr_detection": DEFAULT_OCR_DETECTION_SYSTEM_PROMPT,
     "classify": DEFAULT_CLASSIFICATION_SYSTEM_PROMPT,
+    "segment":DEFAULT_POLYGON_SYSTEM_PROMPT,
     "ocr": DEFAULT_OCR_SYSTEM_PROMPT,
     "vqa": DEFAULT_VQA_SYSTEM_PROMPT
 }
@@ -265,41 +248,208 @@ class IsaacModel(SamplesMixin, Model):
     def system_prompt(self, value):
         self._custom_system_prompt = value
 
-    def _parse_json(self, s: str) -> Optional[Dict]:
-        """Parse JSON from model output.
+
+    def _strip_think_blocks(self, text: str) -> str:
+        """Remove <think>...</think> blocks from text."""
+        return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+    def _parse_coordinates(self, coord_str: str) -> Optional[List[float]]:
+        """Extract coordinates from various formats like (x,y) or (x1,y1) (x2,y2)."""
+        # Find all numbers (int or float) in the string
+        numbers = re.findall(r'-?\d+(?:\.\d+)?', coord_str)
+        if numbers:
+            return [float(n) for n in numbers]
+        return None
+
+    def _extract_point_boxes(self, text: str) -> List[Dict]:
+        """Extract all <point_box> elements from text."""
+        boxes = []
         
-        The model may return JSON in different formats:
-        1. Raw JSON string
-        2. JSON wrapped in markdown code blocks (```json ... ```)
-        3. Non-JSON string (returns None)
+        # Pattern for point_box with optional mention attribute
+        pattern = r'<point_box(?:\s+mention="([^"]*)")?\s*>\s*(.*?)\s*</point_box>'
         
-        Args:
-            s: String output from the model to parse
+        for match in re.finditer(pattern, text, re.DOTALL):
+            mention = match.group(1)  # May be None
+            coords_text = match.group(2)
             
-        Returns:
-            Dict: Parsed JSON dictionary if successful
-            None: If parsing fails or input is invalid
-            Original input: If input is not a string
+            coords = self._parse_coordinates(coords_text)
+            if coords and len(coords) >= 4:
+                boxes.append({
+                    'bbox_2d': coords[:4],  # Take first 4 numbers
+                    'label': mention or 'object'
+                })
+        
+        return boxes
+
+    def _extract_points(self, text: str) -> List[Dict]:
+        """Extract all <point> elements from text."""
+        points = []
+        
+        # Pattern for point with optional mention attribute
+        pattern = r'<point(?:\s+mention="([^"]*)")?\s*>\s*(.*?)\s*</point>'
+        
+        for match in re.finditer(pattern, text, re.DOTALL):
+            mention = match.group(1)  # May be None
+            coords_text = match.group(2)
+            
+            coords = self._parse_coordinates(coords_text)
+            if coords and len(coords) >= 2:
+                points.append({
+                    'point_2d': coords[:2],  # Take first 2 numbers
+                    'label': mention or 'point'
+                })
+        
+        return points
+
+    def _extract_polygons(self, text: str) -> List[Dict]:
+        """Extract all <polygon> elements from text."""
+        polygons = []
+        
+        # Pattern for polygon with optional mention attribute
+        pattern = r'<polygon(?:\s+mention="([^"]*)")?\s*>\s*(.*?)\s*</polygon>'
+        
+        for match in re.finditer(pattern, text, re.DOTALL):
+            mention = match.group(1)  # May be None
+            coords_text = match.group(2)
+            
+            coords = self._parse_coordinates(coords_text)
+            if coords and len(coords) >= 6:  # At least 3 points (6 numbers)
+                # Group coordinates into pairs
+                vertices = []
+                for i in range(0, len(coords) - 1, 2):
+                    vertices.append([coords[i], coords[i + 1]])
+                
+                polygons.append({
+                    'vertices': vertices,
+                    'label': mention or 'polygon'
+                })
+        
+        return polygons
+
+    def _extract_all_elements(self, text: str, element_type: str = None) -> List[Dict]:
+        """Extract all elements from text, both from collections and standalone, with proper inheritance."""
+        all_elements = []
+        
+        # Pattern for collection with optional mention attribute
+        collection_pattern = r'<collection(?:\s+mention="([^"]*)")?\s*>(.*?)</collection>'
+        
+        # First, process collections
+        for match in re.finditer(collection_pattern, text, re.DOTALL):
+            collection_mention = match.group(1)
+            collection_content = match.group(2)
+            
+            # Extract elements from within the collection
+            if element_type == 'point_box' or element_type is None:
+                boxes = self._extract_point_boxes(collection_content)
+                for box in boxes:
+                    # Inherit collection mention if box doesn't have one
+                    if box['label'] == 'object' and collection_mention:
+                        box['label'] = collection_mention
+                    all_elements.append({'bbox_2d': box['bbox_2d'], 'label': box['label']})
+            
+            if element_type == 'point' or element_type is None:
+                points = self._extract_points(collection_content)
+                for point in points:
+                    # Inherit collection mention if point doesn't have one
+                    if point['label'] == 'point' and collection_mention:
+                        point['label'] = collection_mention
+                    all_elements.append({'point_2d': point['point_2d'], 'label': point['label']})
+            
+            if element_type == 'polygon' or element_type is None:
+                polygons = self._extract_polygons(collection_content)
+                for polygon in polygons:
+                    # Inherit collection mention if polygon doesn't have one
+                    if polygon['label'] == 'polygon' and collection_mention:
+                        polygon['label'] = collection_mention
+                    all_elements.append({'vertices': polygon['vertices'], 'label': polygon['label']})
+        
+        # Remove collections from text to avoid double-processing
+        text_without_collections = re.sub(collection_pattern, '', text, flags=re.DOTALL)
+        
+        # Process standalone elements (not in collections)
+        if element_type == 'point_box' or element_type is None:
+            all_elements.extend(self._extract_point_boxes(text_without_collections))
+        if element_type == 'point' or element_type is None:
+            all_elements.extend(self._extract_points(text_without_collections))
+        if element_type == 'polygon' or element_type is None:
+            all_elements.extend(self._extract_polygons(text_without_collections))
+        
+        return all_elements
+
+    def _parse_model_output(self, output_text: str) -> Dict:
         """
-        # Return input directly if not a string
-        if not isinstance(s, str):
-            return s
-            
-        # Handle JSON wrapped in markdown code blocks
-        if "```json" in s:
-            try:
-                # Extract JSON between ```json and ``` markers
-                s = s.split("```json")[1].split("```")[0].strip()
-            except:
-                pass
+        Unified parser that handles both XML-like and JSON formats.
+        Returns a standardized dictionary structure regardless of input format.
+        """
+        # Step 1: Clean the output
+        cleaned_text = self._strip_think_blocks(output_text)
         
-        # Attempt to parse the JSON string
-        try:
-            return json.loads(s)
-        except:
-            # Log first 200 chars of failed parse for debugging
-            logger.debug(f"Failed to parse JSON: {s[:200]}")
-            return None
+        # Step 2: Detect format and parse accordingly
+        # Check if it's XML-like format
+        has_xml_tags = any(tag in cleaned_text for tag in ['<point>', '<point_box>', '<polygon>', '<collection>'])
+        
+        if has_xml_tags:
+            # Parse XML-like format
+            result = {
+                'detections': [],
+                'keypoints': [],
+                'polygons': [],
+                'text_detections': [],
+                'classifications': []
+            }
+            
+            # Extract all elements (both from collections and standalone)
+            all_elements = self._extract_all_elements(cleaned_text)
+            
+            # Sort elements into appropriate categories
+            for elem in all_elements:
+                if 'bbox_2d' in elem:
+                    result['detections'].append(elem)
+                    # Also could be text detection if it's OCR
+                    result['text_detections'].append({
+                        'bbox_2d': elem['bbox_2d'],
+                        'text': elem['label']  # For OCR, label contains the text
+                    })
+                elif 'point_2d' in elem:
+                    result['keypoints'].append(elem)
+                elif 'vertices' in elem:
+                    result['polygons'].append(elem)
+            
+            return result
+        else:
+            # Try JSON format parsing
+            json_text = cleaned_text
+            
+            # Handle JSON wrapped in markdown code blocks
+            if "```json" in json_text:
+                try:
+                    # Extract JSON between ```json and ``` markers
+                    json_text = json_text.split("```json")[1].split("```")[0].strip()
+                except:
+                    pass
+            
+            # Attempt to parse the JSON string
+            try:
+                parsed_json = json.loads(json_text)
+                # Ensure all expected keys exist
+                if isinstance(parsed_json, dict):
+                    for key in ['detections', 'keypoints', 'polygons', 'classifications', 'text_detections']:
+                        if key not in parsed_json:
+                            parsed_json[key] = []
+                    return parsed_json
+            except:
+                # Log first 200 chars of failed parse for debugging
+                logger.debug(f"Failed to parse as JSON: {json_text[:200]}")
+            
+            # If both fail, return empty structure
+            logger.debug(f"Could not parse output in any known format: {cleaned_text[:200]}")
+            return {
+                'detections': [],
+                'keypoints': [],
+                'polygons': [],
+                'classifications': [],
+                'text_detections': []
+            }
 
     def _to_detections(self, boxes: List[Dict], image_width: int, image_height: int) -> fo.Detections:
         """Convert bounding boxes to FiftyOne Detections.
@@ -455,52 +605,53 @@ class IsaacModel(SamplesMixin, Model):
                 
         return fo.Keypoints(keypoints=keypoints)
 
-    def _process_output(self, output_text: str, image: Image.Image):
-        """Process model output text based on the current operation type.
+    def _to_polygons(self, polygons: List[Dict], image_width: int, image_height: int) -> fo.Polylines:
+        """Convert polygon data to FiftyOne Polylines.
         
         Args:
-            output_text: Raw text output from the model
-            image: PIL Image that was processed (needed for size information)
-            
+            polygons: List of dictionaries containing polygon information.
+                Each dictionary should have:
+                - 'vertices': List of [x,y] coordinate pairs in 0-1000 range
+                - 'label': String label describing the polygon
+            image_width: Width of the image in pixels
+            image_height: Height of the image in pixels
+                
         Returns:
-            Processed output in the appropriate format for the operation:
-            - str for vqa and ocr operations
-            - fo.Detections for detect and ocr_detection operations
-            - fo.Keypoints for point operations
-            - fo.Classifications for classify operations
-            - None if operation is not recognized
+            fo.Polylines object containing the polygon annotations
         """
-        if self.operation == "vqa":
-            return output_text.strip()
+        if not polygons:
+            return fo.Polylines(polylines=[])
+            
+        polylines = []
         
-        elif self.operation == "ocr":
-            return output_text.strip()
-        
-        elif self.operation == "detect":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('detections', [])
-            input_width, input_height = image.size
-            return self._to_detections(data, input_width, input_height)
-        
-        elif self.operation == "point":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('keypoints', [])
-            input_width, input_height = image.size
-            return self._to_keypoints(data, input_width, input_height)
-        
-        elif self.operation == "classify":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('classifications', [])
-            return self._to_classifications(data)
-        
-        elif self.operation == "ocr_detection":
-            parsed = self._parse_json(output_text) or {}
-            data = parsed.get('text_detections', [])
-            input_width, input_height = image.size
-            return self._to_ocr_detections(data, input_width, input_height)
-        
-        else:
-            return None
+        for polygon in polygons:
+            try:
+                vertices = polygon.get('vertices', [])
+                if not vertices or len(vertices) < 3:
+                    continue
+                    
+                # Convert vertices from 0-1000 range to 0-1 normalized
+                normalized_points = []
+                for x, y in vertices:
+                    norm_x = float(x) / 1000.0
+                    norm_y = float(y) / 1000.0
+                    normalized_points.append([norm_x, norm_y])
+                
+                # Create a Polyline - points should be a list of shapes, 
+                # where each shape is a list of [x,y] points
+                polyline = fo.Polyline(
+                    label=str(polygon.get('label', 'polygon')),
+                    points=[normalized_points],  # Wrap in list since it's one polygon
+                    closed=True,  # Polygons are closed shapes
+                    filled=True   # Can be used as segmentation masks
+                )
+                polylines.append(polyline)
+                
+            except Exception as e:
+                logger.debug(f"Error processing polygon {polygon}: {e}")
+                continue
+                
+        return fo.Polylines(polylines=polylines)
 
     def _to_classifications(self, classes: List[Dict]) -> fo.Classifications:
         """Convert a list of classification dictionaries to FiftyOne Classifications.
@@ -535,6 +686,81 @@ class IsaacModel(SamplesMixin, Model):
         # Return Classifications container with all processed results
         return fo.Classifications(classifications=classifications)
 
+
+    def _process_output(self, output_text: str, image: Image.Image):
+        """Process model output text based on the current operation type.
+        
+        Args:
+            output_text: Raw text output from the model
+            image: PIL Image that was processed (needed for size information)
+            
+        Returns:
+            Processed output in the appropriate format for the operation:
+            - str for vqa and ocr operations
+            - fo.Detections for detect and ocr_detection operations
+            - fo.Keypoints for point operations
+            - fo.Classifications for classify operations
+            - None if operation is not recognized
+        """
+        if self.operation == "vqa":
+            # VQA returns plain text after stripping think blocks
+            cleaned = self._strip_think_blocks(output_text)
+            return cleaned.strip()
+        
+        elif self.operation == "ocr":
+            # OCR returns plain text after stripping think blocks
+            cleaned = self._strip_think_blocks(output_text)
+            return cleaned.strip()
+        
+        elif self.operation == "detect":
+            parsed = self._parse_model_output(output_text)
+            data = parsed.get('detections', [])
+            input_width, input_height = image.size
+            return self._to_detections(data, input_width, input_height)
+        
+        elif self.operation == "point":
+            parsed = self._parse_model_output(output_text)
+            data = parsed.get('keypoints', [])
+            
+            # Special case: if model outputs point_boxes when asked for points,
+            # convert them to keypoints (use center of box)
+            if not data and parsed.get('detections'):
+                for detection in parsed['detections']:
+                    if 'bbox_2d' in detection:
+                        x1, y1, x2, y2 = detection['bbox_2d']
+                        center_x = (x1 + x2) / 2
+                        center_y = (y1 + y2) / 2
+                        data.append({
+                            'point_2d': [center_x, center_y],
+                            'label': detection.get('label', 'point')
+                        })
+            
+            input_width, input_height = image.size
+            return self._to_keypoints(data, input_width, input_height)
+        
+        elif self.operation == "classify":
+            # Classifications might still come as JSON
+            parsed = self._parse_model_output(output_text)
+            data = parsed.get('classifications', [])
+            return self._to_classifications(data)
+        
+        elif self.operation == "ocr_detection":
+            parsed = self._parse_model_output(output_text)
+            # For OCR detection, the text is in the label/mention
+            data = parsed.get('text_detections', [])
+            input_width, input_height = image.size
+            return self._to_ocr_detections(data, input_width, input_height)
+        
+        elif self.operation == "polygon" or self.operation == "segment":
+            # Add polygon/segmentation operation support
+            parsed = self._parse_model_output(output_text)
+            data = parsed.get('polygons', [])
+            input_width, input_height = image.size
+            return self._to_polygons(data, input_width, input_height)
+        
+        else:
+            return None
+
     def _predict(self, image: Image.Image, sample=None) -> Union[fo.Detections, fo.Keypoints, fo.Classifications, str]:
         """Process a single image through the model and return predictions.
         
@@ -567,9 +793,9 @@ class IsaacModel(SamplesMixin, Model):
 
         # Prepare input
         messages = [
-            {"role": "system", "type": "text", "content": self.system_prompt},
-            {"role": "user", "type": "image", "content": "<image>"},
-            {"role": "user", "type": "text", "content": prompt}
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": "<image>"},
+            {"role": "user", "content": prompt}
         ]
         images = [image]  # Replace with your image path
 
@@ -594,6 +820,8 @@ class IsaacModel(SamplesMixin, Model):
                 tensor_stream=tensor_stream,
                 max_new_tokens=8192,
                 do_sample=False,
+                pad_token_id=self.processor.tokenizer.eos_token_id,
+                eos_token_id=self.processor.tokenizer.eos_token_id,
             )
 
         # Decode and process output
@@ -628,9 +856,9 @@ class IsaacModel(SamplesMixin, Model):
             
             # Prepare messages for this image
             messages = [
-                {"role": "system", "type": "text", "content": self.system_prompt},
-                {"role": "user", "type": "image", "content": "<image>"},
-                {"role": "user", "type": "text", "content": prompt}
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": "<image>"},
+                {"role": "user", "content": prompt}
             ]
             
             # Process input
@@ -642,7 +870,7 @@ class IsaacModel(SamplesMixin, Model):
             
             inputs = self.processor(
                 text=text, 
-                images=[image],  # Single image for this iteration
+                images=[image],
                 return_tensors="pt"
             )
             
@@ -654,6 +882,8 @@ class IsaacModel(SamplesMixin, Model):
                     tensor_stream=tensor_stream,
                     max_new_tokens=8192,
                     do_sample=False,
+                    pad_token_id=self.processor.tokenizer.eos_token_id,
+                    eos_token_id=self.processor.tokenizer.eos_token_id,
                 )
             
             # Decode and process output

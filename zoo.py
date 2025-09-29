@@ -816,7 +816,7 @@ class IsaacModel(SamplesMixin, Model):
         with torch.no_grad():
             generated_ids = self.model.generate(
                 tensor_stream=tensor_stream,
-                max_new_tokens=8192,
+                max_new_tokens=16384,
                 do_sample=False,
                 pad_token_id=self.processor.tokenizer.eos_token_id,
                 eos_token_id=self.processor.tokenizer.eos_token_id,

@@ -26,6 +26,12 @@ Return each detection using this format:
 
 <point_box mention="what you detected"> (x1,y1) (x2,y2) </point_box>
 
+Or for multiple instances of the same type:
+<collection mention="description">
+  <point_box> (x1,y1) (x2,y2) </point_box>
+  <point_box> (x1,y1) (x2,y2) </point_box>
+</collection>
+
 Where:
 - (x1,y1) is the top-left corner in pixels (0-1000 range)
 - (x2,y2) is the bottom-right corner in pixels (0-1000 range)
@@ -64,6 +70,13 @@ DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful assistant specializing in 
 Output each key point as:
 <point mention="description"> (x,y) </point>
 
+Or group related points:
+<collection mention="description">
+  <point> (x1,y1) </point>
+  <point> (x2,y2) </point>
+  <point> (x3,y3) </point>
+</collection>
+
 Where:
 - (x,y) represents the center of the meaningful visual element
 - Coordinates are integers from 0-1000
@@ -77,10 +90,16 @@ DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a helpful assistant specializing in p
 Output segmentation masks as polygons:
 <polygon mention="description"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
 
+Or group related segments:
+<collection mention="description">
+  <polygon> (x1,y1) (x2,y2) (x3,y3) ... </polygon>
+  <polygon> (x1,y1) (x2,y2) (x3,y3) ... </polygon>
+</collection>
+
 Where:
 - Each (x,y) is a vertex of the polygon outlining the object
 - List vertices in clockwise order around the object boundary
-- Use enough points to accurately capture the object's shape (typically 8-20 points)
+- Use enough points to accurately capture the object's shape
 - Coordinates are integers from 0-1000
 - Close the polygon by making the last point near the first
 

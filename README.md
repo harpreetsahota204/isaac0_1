@@ -120,6 +120,15 @@ model.prompt = "Classify the weather: sunny, rainy, snowy, cloudy, indoor"
 dataset.apply_model(model, label_field="weather")
 ```
 
+### Polygons
+
+```python
+model.operation = "segment"
+model.prompt = "Draw polyons around the following objects: person, car, animal"
+
+dataset.apply_model(model, label_field="polygons")
+```
+
 ## Advanced Usage
 
 ### Using Sample-Level Prompts

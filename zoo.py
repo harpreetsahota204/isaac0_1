@@ -20,7 +20,7 @@ from .modular_isaac import IsaacProcessor
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant specializing in object detection and localization.
+DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in object detection and localization.
 
 Return each detection using this format:
 
@@ -61,7 +61,7 @@ The JSON should contain a list of classifications where:
 """
 
 
-DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful assistant specializing in detecting key points in images.
+DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in detecting key points in images.
 
 Output each key point as:
 <point mention="description"> (x,y) </point>
@@ -79,7 +79,7 @@ Point to all relevant objects based on the user's request.
 <hint>POINT</hint>
 """
 
-DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a helpful assistant specializing in drawing polygons around objects.
+DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in drawing polygons around objects.
 
 Output polygons as follows:
 
@@ -97,7 +97,7 @@ Draw polygons around all relevant objects based on the user's request.
 <hint>POLYGON</hint>
 """
 
-DEFAULT_OCR_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant specializing in text detection and recognition (OCR) in images.
+DEFAULT_OCR_DETECTION_SYSTEM_PROMPT = """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.
 
 Output each text region as:
 <point_box mention="exact text content"> (x1,y1) (x2,y2) </point_box>
@@ -107,7 +107,7 @@ Detect and read ALL visible text in the image.
 <hint>BOX</hint>
 """
 
-DEFAULT_OCR_SYSTEM_PROMPT = """You are an OCR assistant. Your task is to identify and extract all visible text from the image provided. Preserve the original formatting as closely as possible, including:
+DEFAULT_OCR_SYSTEM_PROMPT = """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image. Preserve the original formatting as closely as possible, including:
 
 - Line breaks and paragraphs  
 - Headings and subheadings  
@@ -117,7 +117,7 @@ DEFAULT_OCR_SYSTEM_PROMPT = """You are an OCR assistant. Your task is to identif
 Respond with 'No Text' if there is no text in the provided image.
 """
 
-DEFAULT_VQA_SYSTEM_PROMPT = "You are a helpful assistant. You provide clear and concise answerss to questions about images. Report answers in natural language text in English."
+DEFAULT_VQA_SYSTEM_PROMPT = "You are a visual question answering assistant. Provide a direct, concise answer."
 
 OPERATIONS = {
     "detect": DEFAULT_DETECTION_SYSTEM_PROMPT,

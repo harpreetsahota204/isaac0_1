@@ -689,8 +689,7 @@ class IsaacModel(SamplesMixin, Model):
                             'label': detection.get('label', 'point')
                         })
             
-            input_width, input_height = image.size
-            return self._to_keypoints(data, input_width, input_height)
+            return self._to_keypoints(data)
         
         elif self.operation == "classify":
             # Classifications might still come as JSON

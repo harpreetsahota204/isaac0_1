@@ -20,20 +20,20 @@ from .modular_isaac import IsaacProcessor
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in object detection and localization.
+DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in object detection and counting.
 
 Return each detection using this format:
 
-<point_box mention="description"> (x1,y1) (x2,y2) </point_box>
+<point_box mention="object label"> (x1,y1) (x2,y2) </point_box>
 
 Or for multiple instances of the same type:
 
-<collection mention="description">
+<collection mention="object label">
   <point_box> (x1,y1) (x2,y2) </point_box>
   <point_box> (x1,y1) (x2,y2) </point_box>
 </collection>
 
-Detect all relevant objects based on the user's request.
+Detect all relevant objects and provide their labels based on the user's request.
 
 <hint>BOX</hint>
 """
@@ -61,50 +61,63 @@ The JSON should contain a list of classifications where:
 """
 
 
-DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in detecting key points in images.
+DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful and precise grounded vision assistant specializing in pointing at and counting objects.
 
-Output each key point as:
-<point mention="description"> (x,y) </point>
+Return each keypoint using this format:
+
+<point mention="point label"> (x,y) </point>
 
 Or for multiple instances of the same type:
 
-<collection mention="description">
+<collection mention="point label">
   <point> (x1,y1) </point>
   <point> (x2,y2) </point>
   <point> (x3,y3) </point>
 </collection>
 
-Point to all relevant objects based on the user's request.
+Point to all relevant objects and provide their labels based on the user's request.
 
 <hint>POINT</hint>
 """
 
-DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in drawing polygons around objects.
+DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a helpful and precise grounded vision assistant specializing in drawing polygons around objects and text.
 
-Output polygons as follows:
+Return each polygon using this format:
 
-<polygon mention="description"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
+<polygon mention="polygon label"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
 
 Or for multiple instances of the same type:
 
-<collection mention="description">
+<collection mention="polygon label">
   <polygon> (x1,y1) (x2,y2) (x3,y3) ... </polygon>
   <polygon> (x1,y1) (x2,y2) (x3,y3) ... </polygon>
 </collection>
 
-Draw polygons around all relevant objects based on the user's request.
+Draw polygons around all relevant objects and provide their labels based on the user's request.
 
 <hint>POLYGON</hint>
 """
 
 DEFAULT_OCR_DETECTION_SYSTEM_PROMPT = """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.
 
-Output each text region as:
-<point_box mention="exact text content"> (x1,y1) (x2,y2) </point_box>
+Return each text detection using this format, where "text content" is the actual text you detect:
 
-Detect and read ALL visible text in the image.
+<point_box mention="text content"> (x1,y1) (x2,y2) </point_box>
+
+Detect and read the text in the image.
 
 <hint>BOX</hint>
+"""
+
+DEFAULT_OCR_POLYGON_SYSTEM_PROMPT = """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.
+
+Return each text detection using this format, where "text content" is the actual text you detect:
+
+<polygon mention="text content"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
+
+Detect and read the text in the image.
+
+<hint>POLYGON</hint>
 """
 
 DEFAULT_OCR_SYSTEM_PROMPT = """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image. Preserve the original formatting as closely as possible, including:
@@ -123,6 +136,7 @@ OPERATIONS = {
     "detect": DEFAULT_DETECTION_SYSTEM_PROMPT,
     "point": DEFAULT_KEYPOINT_SYSTEM_PROMPT,
     "ocr_detection": DEFAULT_OCR_DETECTION_SYSTEM_PROMPT,
+    "ocr_polygon": DEFAULT_OCR_POLYGON_SYSTEM_PROMPT,
     "classify": DEFAULT_CLASSIFICATION_SYSTEM_PROMPT,
     "segment":DEFAULT_POLYGON_SYSTEM_PROMPT,
     "ocr": DEFAULT_OCR_SYSTEM_PROMPT,
@@ -393,6 +407,7 @@ class IsaacModel(SamplesMixin, Model):
                 'keypoints': [],
                 'polygons': [],
                 'text_detections': [],
+                'text_polygons': [],
                 'classifications': []
             }
             
@@ -403,15 +418,16 @@ class IsaacModel(SamplesMixin, Model):
             for elem in all_elements:
                 if 'bbox_2d' in elem:
                     result['detections'].append(elem)
-                    # Also could be text detection if it's OCR
-                    result['text_detections'].append({
-                        'bbox_2d': elem['bbox_2d'],
-                        'text': elem['label']  # For OCR, label contains the text
-                    })
+                    # Also add to text_detections for OCR operations
+                    # Using 'label' consistently instead of 'text' field
+                    result['text_detections'].append(elem)
                 elif 'point_2d' in elem:
                     result['keypoints'].append(elem)
                 elif 'vertices' in elem:
                     result['polygons'].append(elem)
+                    # Also add to text_polygons for OCR polygon operations
+                    # Using 'label' consistently for the detected text
+                    result['text_polygons'].append(elem)
             
             return result
         else:
@@ -431,7 +447,7 @@ class IsaacModel(SamplesMixin, Model):
                 parsed_json = json.loads(json_text)
                 # Ensure all expected keys exist
                 if isinstance(parsed_json, dict):
-                    for key in ['detections', 'keypoints', 'polygons', 'classifications', 'text_detections']:
+                    for key in ['detections', 'keypoints', 'polygons', 'classifications', 'text_detections', 'text_polygons']:
                         if key not in parsed_json:
                             parsed_json[key] = []
                     return parsed_json
@@ -446,19 +462,20 @@ class IsaacModel(SamplesMixin, Model):
                 'keypoints': [],
                 'polygons': [],
                 'classifications': [],
-                'text_detections': []
+                'text_detections': [],
+                'text_polygons': []
             }
 
-    def _to_detections(self, boxes: List[Dict], image_width: int, image_height: int) -> fo.Detections:
+    def _to_detections(self, boxes: List[Dict]) -> fo.Detections:
         """Convert bounding boxes to FiftyOne Detections.
+        
+        This method handles both regular object detections and OCR text detections.
         
         Args:
             boxes: List of dictionaries containing bounding box info.
                 Each box should have:
                 - 'bbox_2d' or 'bbox': List of [x1,y1,x2,y2] coordinates in 0-1000 range from model
-                - 'label': Optional string label (defaults to "object")
-            image_width: Width of the image in pixels
-            image_height: Height of the image in pixels
+                - 'label': String label (defaults to "object"). For OCR detections, this contains the detected text.
 
         Returns:
             fo.Detections object containing the converted bounding box annotations
@@ -500,66 +517,8 @@ class IsaacModel(SamplesMixin, Model):
                 
         return fo.Detections(detections=detections)
 
-    def _to_ocr_detections(
-        self, 
-        boxes: List[Dict], 
-        image_width: int, 
-        image_height: int
-    ) -> fo.Detections:
-        """Convert OCR results to FiftyOne Detections with text content.
-        
-        Args:
-            boxes: List of OCR dictionaries
-            image_width: Width of the original image in pixels
-            image_height: Height of the original image in pixels
-            
-        Returns:
-            fo.Detections object containing the OCR annotations with text content
-        """
-        if not boxes:
-            return fo.Detections(detections=[])
-            
-        detections = []
-        
-        # Process each OCR box
-        for box in boxes:
-            try:
-                # Extract the bounding box coordinates and text content
-                bbox = box.get('bbox_2d', box.get('bbox', None))
-                text = box.get('text', '')  # The actual text string
-                
-                # Skip if missing required bbox or text fields
-                if not bbox or text is None:
-                    continue
-                
-                # Ensure text is a string (just like we do in regular detections)
-                text = str(text) if text else ""
-                
-                # Model outputs coordinates in 0-1000 range, normalize to 0-1
-                x1, y1, x2, y2 = map(float, bbox)
-                
-                # Convert to FiftyOne format: [x, y, width, height]
-                x = x1 / 1000.0  # Left coordinate (normalized)
-                y = y1 / 1000.0  # Top coordinate (normalized)
-                w = (x2 - x1) / 1000.0  # Width (normalized)
-                h = (y2 - y1) / 1000.0  # Height (normalized)
-                
-                # Create Detection object with normalized coordinates
-                detection = fo.Detection(
-                    label=text,  # Text content as label, just like regular detections
-                    bounding_box=[x, y, w, h],
-                )
-                detections.append(detection)
-                
-            except Exception as e:
-                # Log any errors processing individual boxes but continue
-                logger.debug(f"Error processing OCR box {box}: {e}")
-                continue
-                
-        # Return all detections wrapped in a FiftyOne Detections container
-        return fo.Detections(detections=detections)
 
-    def _to_keypoints(self, points: List[Dict], image_width: int, image_height: int) -> fo.Keypoints:
+    def _to_keypoints(self, points: List[Dict]) -> fo.Keypoints:
         """Convert a list of point dictionaries to FiftyOne Keypoints.
         
         Args:
@@ -567,8 +526,6 @@ class IsaacModel(SamplesMixin, Model):
                 Each point should have:
                 - 'point_2d': List of [x,y] coordinates in 0-1000 range from model
                 - 'label': String label describing the point
-            image_width: Width of the image in pixels
-            image_height: Height of the image in pixels
                 
         Returns:
             fo.Keypoints object containing the converted keypoint annotations
@@ -603,16 +560,16 @@ class IsaacModel(SamplesMixin, Model):
                 
         return fo.Keypoints(keypoints=keypoints)
 
-    def _to_polygons(self, polygons: List[Dict], image_width: int, image_height: int) -> fo.Polylines:
+    def _to_polygons(self, polygons: List[Dict]) -> fo.Polylines:
         """Convert polygon data to FiftyOne Polylines.
+        
+        This method handles both regular polygon segmentations and OCR text polygons.
         
         Args:
             polygons: List of dictionaries containing polygon information.
                 Each dictionary should have:
                 - 'vertices': List of [x,y] coordinate pairs in 0-1000 range
-                - 'label': String label describing the polygon
-            image_width: Width of the image in pixels
-            image_height: Height of the image in pixels
+                - 'label': String label describing the polygon. For OCR polygons, this contains the detected text.
                 
         Returns:
             fo.Polylines object containing the polygon annotations
@@ -713,8 +670,7 @@ class IsaacModel(SamplesMixin, Model):
         elif self.operation == "detect":
             parsed = self._parse_model_output(output_text)
             data = parsed.get('detections', [])
-            input_width, input_height = image.size
-            return self._to_detections(data, input_width, input_height)
+            return self._to_detections(data)
         
         elif self.operation == "point":
             parsed = self._parse_model_output(output_text)
@@ -744,17 +700,21 @@ class IsaacModel(SamplesMixin, Model):
         
         elif self.operation == "ocr_detection":
             parsed = self._parse_model_output(output_text)
-            # For OCR detection, the text is in the label/mention
+            # For OCR detection, the text is stored in the label field
             data = parsed.get('text_detections', [])
-            input_width, input_height = image.size
-            return self._to_ocr_detections(data, input_width, input_height)
+            return self._to_detections(data)
+        
+        elif self.operation == "ocr_polygon":
+            parsed = self._parse_model_output(output_text)
+            # For OCR polygon detection, the text is stored in the label field
+            data = parsed.get('text_polygons', [])
+            return self._to_polygons(data)
         
         elif self.operation == "polygon" or self.operation == "segment":
             # Add polygon/segmentation operation support
             parsed = self._parse_model_output(output_text)
             data = parsed.get('polygons', [])
-            input_width, input_height = image.size
-            return self._to_polygons(data, input_width, input_height)
+            return self._to_polygons(data)
         
         else:
             return None

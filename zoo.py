@@ -20,7 +20,7 @@ from .modular_isaac import IsaacProcessor
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a grounded vision assistant specializing in object detection and counting.
+DEFAULT_DETECTION_SYSTEM_PROMPT = """You are a helpful assistant specializing visual grounding for object detection and counting.
 
 Return each detection using this format:
 
@@ -61,7 +61,7 @@ The JSON should contain a list of classifications where:
 """
 
 
-DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful and precise grounded vision assistant specializing in pointing at and counting objects.
+DEFAULT_KEYPOINT_SYSTEM_PROMPT = """You are a helpful assistant specializing visual grounding for pointing at and counting objects.
 
 Return each keypoint using this format:
 
@@ -80,7 +80,7 @@ Point to all relevant objects and provide their labels based on the user's reque
 <hint>POINT</hint>
 """
 
-DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a helpful and precise grounded vision assistant specializing in drawing polygons around objects and text.
+DEFAULT_POLYGON_SYSTEM_PROMPT = """You are a helpful assistant specializing visual grounding for drawing polygons around objects.
 
 Return each polygon using this format:
 

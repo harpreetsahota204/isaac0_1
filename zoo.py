@@ -14,7 +14,7 @@ from transformers import AutoTokenizer, AutoConfig, AutoProcessor, AutoModelForC
 from transformers.utils.import_utils import is_flash_attn_2_available
 
 # Perceptron SDK imports for parsing
-from perceptron import extract_points, strip_tags, extract_reasoning
+from perceptron import extract_points, strip_tags
 
 # Local converters for Perceptron -> FiftyOne types
 from .converters import (
@@ -28,62 +28,23 @@ logger = logging.getLogger(__name__)
 
 OPERATIONS = {
     "detect": {
-        "prompt": """You are a helpful assistant specializing visual grounding for object detection and counting.
-
-Return each detection using this format:
-
-<point_box mention="object label"> (x1,y1) (x2,y2) </point_box>
-
-Or for multiple instances of the same type:
-
-<collection mention="object label">
-  <point_box> (x1,y1) (x2,y2) </point_box>
-  <point_box> (x1,y1) (x2,y2) </point_box>
-</collection>
-
-Detect all relevant objects and provide their labels based on the user's request.""",
+        "system_prompt": """Your goal is to segment out the objects in the scene""",
         "hint": "BOX"
     },
     "point": {
-        "prompt": """You are a helpful assistant specializing visual grounding for pointing at and counting objects.
-
-Return each keypoint using this format:
-
-<point mention="point label"> (x,y) </point>
-
-Or for multiple instances of the same type:
-
-<collection mention="point label">
-  <point> (x1,y1) </point>
-  <point> (x2,y2) </point>
-  <point> (x3,y3) </point>
-</collection>
-
-Point to all relevant objects and provide their labels based on the user's request.""",
+        "system_prompt": """Your goal is to segment out the objects in the scene""",
         "hint": "POINT"
     },
     "ocr_detection": {
-        "prompt": """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.
-
-Return each text detection using this format, where "text content" is the actual text you detect:
-
-<point_box mention="text content"> (x1,y1) (x2,y2) </point_box>
-
-Detect and read the text in the image.""",
+        "system_prompt": """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.""",
         "hint": "BOX"
     },
     "ocr_polygon": {
-        "prompt": """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.
-
-Return each text detection using this format, where "text content" is the actual text you detect:
-
-<polygon mention="text content"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
-
-Detect and read the text in the image.""",
+        "system_prompt": """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image.""",
         "hint": "POLYGON"
     },
     "classify": {
-        "prompt": """You are a helpful assistant. You specializes in comprehensive classification across any visual domain, capable of analyzing:
+        "system_prompt": """You are a helpful assistant. You specializes in comprehensive classification across any visual domain, capable of analyzing:
 
 Unless specifically requested for single-class output, multiple relevant classifications can be provided.
 
@@ -105,35 +66,14 @@ The JSON should contain a list of classifications where:
 - The response should be a list of classifications"""
     },
     "segment": {
-        "prompt": """You are a helpful assistant specializing visual grounding for drawing polygons around objects.
-
-Return each polygon using this format:
-
-<polygon mention="polygon label"> (x1,y1) (x2,y2) (x3,y3) (x4,y4) ... </polygon>
-
-Or for multiple instances of the same type:
-
-<collection mention="polygon label">
-  <polygon> (x1,y1) (x2,y2) (x3,y3) ... </polygon>
-  <polygon> (x1,y1) (x2,y2) (x3,y3) ... </polygon>
-</collection>
-
-Draw polygons around all relevant objects and provide their labels based on the user's request.""",
+        "system_prompt": """Your goal is to segment out the objects in the scene""",
         "hint": "POLYGON"
     },
     "ocr": {
-        "prompt": """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image. Preserve the original formatting as closely as possible, including:
-
-- Line breaks and paragraphs  
-- Headings and subheadings  
-- Any tables, lists, bullet points, or numbered items  
-- Special characters, spacing, and alignment  
-
-Respond with 'No Text' if there is no text in the provided image."""
+        "system_prompt": """You are an OCR (Optical Character Recognition) system. Accurately detect, extract, and transcribe all readable text from the image."""
     },
-    "vqa": {
-        "prompt": "You are a visual question answering assistant. Provide a direct, concise answer."
-    }
+    # VQA has no system prompt - aligning with Perceptron SDK
+    "vqa": {}
 }
 
 def get_device():
@@ -245,7 +185,7 @@ class IsaacModel(SamplesMixin, Model):
         # Return custom system prompt if set, otherwise return default for current operation
         if self._custom_system_prompt is not None:
             return self._custom_system_prompt
-        return OPERATIONS[self.operation].get("prompt", "")
+        return OPERATIONS[self.operation].get("system_prompt", "")
 
     @system_prompt.setter
     def system_prompt(self, value):
@@ -290,9 +230,8 @@ class IsaacModel(SamplesMixin, Model):
         Returns:
             List of classification dictionaries with 'label' keys
         """
-        # Remove think blocks first, then strip geometry tags
-        text_without_think = extract_reasoning(output_text).text
-        cleaned_text = strip_tags(text_without_think).strip()
+        # Strip geometry tags
+        cleaned_text = strip_tags(output_text).strip()
 
         # Extract JSON from markdown code block if present
         if "```json" in cleaned_text:
@@ -340,14 +279,12 @@ class IsaacModel(SamplesMixin, Model):
             Processed output in the appropriate format for the operation
         """
         if self.operation == "vqa":
-            # Remove think blocks, then strip geometry tags
-            text_without_think = extract_reasoning(output_text).text
-            return strip_tags(text_without_think).strip()
+            # Strip geometry tags
+            return strip_tags(output_text).strip()
 
         elif self.operation == "ocr":
-            # Remove think blocks, then strip geometry tags
-            text_without_think = extract_reasoning(output_text).text
-            return strip_tags(text_without_think).strip()
+            # Strip geometry tags
+            return strip_tags(output_text).strip()
 
         elif self.operation == "detect":
             # Extract bounding boxes using Perceptron SDK
@@ -406,21 +343,18 @@ class IsaacModel(SamplesMixin, Model):
             if field_value is not None:
                 prompt = str(field_value)
 
-        # Prepare input with optional hint
-        messages = [
-            {"type": "text", "content": self.system_prompt, "role": "system"},
-        ]
-        
-        # Add hint if available for this operation
+        # Build system prompt with optional hint prepended
         hint = OPERATIONS[self.operation].get("hint")
         if hint:
-            messages.append({"type": "text", "content": f"<hint>{hint}</hint>", "role": "user"})
-        
-        # Add image and user prompt
-        messages.extend([
+            system_content = f"<hint>{hint}</hint>\n\n{self.system_prompt}"
+        else:
+            system_content = self.system_prompt
+
+        messages = [
+            {"type": "text", "content": system_content, "role": "system"},
             {"type": "image", "content": "<image>", "role": "user"},
             {"type": "text", "content": prompt, "role": "user"}
-        ])
+        ]
         
         images = [image]
 
@@ -479,21 +413,18 @@ class IsaacModel(SamplesMixin, Model):
                 if field_value is not None:
                     prompt = str(field_value)
             
-            # Prepare messages for this image with optional hint
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-            ]
-            
-            # Add hint if available for this operation
+            # Build system prompt with optional hint prepended
             hint = OPERATIONS[self.operation].get("hint")
             if hint:
-                messages.append({"role": "user", "content": f"<hint>{hint}</hint>"})
-            
-            # Add image and user prompt
-            messages.extend([
+                system_content = f"<hint>{hint}</hint>\n\n{self.system_prompt}"
+            else:
+                system_content = self.system_prompt
+
+            messages = [
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": "<image>"},
                 {"role": "user", "content": prompt}
-            ])
+            ]
             
             # Process input
             text = self.processor.apply_chat_template(
